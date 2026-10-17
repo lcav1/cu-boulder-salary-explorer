@@ -1,0 +1,41 @@
+name: Refresh Boulder salary snapshot
+on:
+  schedule:
+    - cron: '17 9 1 * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: salary-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect Boulder only
+        run: python -B scripts/refresh.py
+      - name: Validate complete snapshot
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Commit changed snapshot and request Pages deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git diff --quiet -- data/salaries.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add data/salaries.json
+            git commit -m 'data: refresh Boulder salary snapshot'
+            git push origin HEAD:main
+            # GITHUB_TOKEN pushes do not trigger another push workflow.
+            gh workflow run pages.yml --ref main
+          else
+            echo 'Source data unchanged; no deployment needed.'
+          fi
